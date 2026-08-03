@@ -1,0 +1,41 @@
+1.1] Before using out-of-the-box GNN, let's implement a simple simple crystal message-passing model using PyTorch Geometric.
+  For each structure:
+  nodes:      atoms;
+  node input: atomic number or learned elemental embedding;
+  edges:      neighbors within a cutoff under periodic boundary conditions;
+  edge input: interatomic distance expanded in radial basis functions;
+  message passing: scalar features only;
+  readout: sum or mean over atoms;
+  output: scalar refractive index.
+
+  Schematically:
+	m_ij = ϕ_m( h_i , h_j , RBF(r_ij) )
+	h_i^(layer l+1) = ϕ_u( h_i^(layer l) , ​∑_j∈N(i) m_ij   )
+	output= pooling_i( h_i^(L) )
+	-> Because the model consumes only atomic identities and distances, and uses permutation-invariant neighbor aggregation and global pooling, its scalar prediction is invariant.
+
+1.2] Use the same dielectric dataset
+I would keep matbench_dielectric in order to directly compare:
+	Model		   Representation	  Learned geometry?
+	Ridge		   averaged SOAP	  No	
+	MLP		   averaged SOAP	  Only after SOAP
+	Simple GNN	   atoms and distances	  Yes
+	ALIGNN/CGCNN-like  richer crystal graph	  Yes
+
+2] Possible idea: ALIGNN-like graph sample dataset
+  The ALIGNN repository includes a complete single-output regression example on 50 JARVIS-DFT crystals, predicting OPT band gaps, 
+  see https://github.com/atomgptlab/alignn/blob/main/docs/training/single-output-regression.md (example is on 50 materials, but is not really  meaningful - use more materials).
+  train_alignn.py --root_dir "alignn/examples/sample_data" --config "alignn/examples/sample_data/config_example.json" --output_dir=temp
+  ALIGNN is especially relevant because it incorporates bond-angle information through message passing on the graph and its line graph ; CHGCNET is for interatomic potential, is something differnet.
+  
+3] Move from scalar to spectrum 
+  - JARVIS-DFT may be well aligned with the final project  because it includes frequency-dependent dielectric function
+    can be downloaded programmatically with jarvis-tools:
+	from jarvis.db.figshare import data
+	dataset = data("dft_3d")
+    See https://jarvis-tools.readthedocs.io/en/master/databases.html
+        https://pages.nist.gov/jarvis/tutorials/
+	https://www.nist.gov/programs-projects/jarvis-dft
+	
+  - Example of implementation to reproduce https://arxiv.org/html/2510.08738v1?utm_source=chatgpt.com 
+    Trained ALIGNN on approximately 7,000 JARVIS meta-GGA dielectric functions, so it provides a close blueprint for structure-to-spectrum prediction
