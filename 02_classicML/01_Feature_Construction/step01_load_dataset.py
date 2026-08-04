@@ -73,9 +73,9 @@ def load_dielectric_dataset() -> pd.DataFrame:
 
 
 def compute_dataset_statistics(
-    structures: pd.Series,
+    structures: pd.Series, 
     targets: pd.Series,
-) -> tuple[pd.Series, pd.DataFrame]:
+    ) -> tuple[pd.Series, pd.DataFrame]:
     """Return global statistics and an element-frequency table.
 
     Requirements
@@ -98,10 +98,33 @@ def compute_dataset_statistics(
     Count each structure once in the element-frequency table, even when several
     atoms of the same element occur in its unit cell.
     """
-    raise NotImplementedError(
-        "Compute structure, target, and element statistics"
-    )
 
+    n_struct = len(structures) # number of structures
+    n_atoms_per_struct = np.array([len(s) for s in structures]) # number of atoms per structure
+    unique_elements_per_struct = [set(el.symbol for el in s.composition.elements) for s in structures] # sets of unique elements per struct
+    n_distinct_elements = np.array([len(els) for els in unique_elements_per_struct]) # number of distinct elements per structure
+    element_freq = pd.Series(unique_elements_per_struct).explode().value_counts().reset_index() # elements frequencies pd.DataFrame
+
+    stats = pd.Series({
+        "n_structures": n_struct,
+        "n_unique_elements": len(element_freq),
+        "target_min": targets.min(),
+        "target_max": targets.max(),
+        "target_mean": targets.mean(),
+        "target_median": targets.median(),
+        "target_std": targets.std(),
+        "atoms_per_structure_min": n_atoms_per_struct.min(),
+        "atoms_per_structure_max": n_atoms_per_struct.max(),
+        "atoms_per_structure_mean": n_atoms_per_struct.mean(),
+        "atoms_per_structure_median": np.median(n_atoms_per_struct),
+        "distinct_elements_per_structure_min": n_distinct_elements.min(),
+        "distinct_elements_per_structure_max": n_distinct_elements.max(),
+        "distinct_elements_per_structure_mean": n_distinct_elements.mean(),
+    })
+
+    element_freq.columns = ["element", "n_structures"] # renaming columns
+
+    return stats, element_freq
 
 #### [ 2. Create reproducible train/validation/test partitions ] ####
 @dataclass
