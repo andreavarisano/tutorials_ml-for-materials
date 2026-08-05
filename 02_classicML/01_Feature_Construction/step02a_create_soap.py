@@ -167,8 +167,15 @@ def collect_sorted_species_list_from_structures(
     ------
     First test the function on two or three structures for which you can list the expected elements by hand.
     """
-    raise NotImplementedError("Collect, deduplicate, and sort the chemical species")
+    # input validation
+    if len(structures) == 0:
+        raise ValueError("The structure collection is empty.")
 
+    return sorted({
+        str(element)
+        for structure in structures
+        for element in structure.composition.elements
+    })
 
 #### [ 2. Configure the SOAP crystal-structure featurizer ] ####
 @dataclass
@@ -238,8 +245,32 @@ class SOAPCrystalStructureFeaturizer:
         - Add DScribe compression or species-weighting settings.
         - Add a method that compares two featurizer configurations.
         """
-        raise NotImplementedError(
-            "Validate the settings and initialize self._soap"
+        # input validation
+        if len(self.species) == 0:
+            raise ValueError("The species collection is empty.")
+        if len(self.species) != len(set(self.species)):
+            raise ValueError("The species collection contains duplicates.")
+        if self.species != sorted(self.species):
+            raise ValueError("The species collection is not sorted.")
+
+        if not (isinstance(self.r_cut, (int, float)) and np.isfinite(self.r_cut) and self.r_cut > 0):
+            raise ValueError("r_cut must be a finite positive number.")
+        if not (isinstance(self.n_max, int) and self.n_max > 0):
+            raise ValueError("n_max must be a positive integer.")
+        if not (isinstance(self.l_max, int) and self.l_max >= 0):
+            raise ValueError("l_max must be a non-negative integer.")
+        if not (isinstance(self.periodic, bool) and isinstance(self.sparse, bool)):
+            raise ValueError("periodic and sparse must be booleans.")
+
+        # descriptor
+        self._soap = SOAP(
+            species=self.species,
+            periodic=self.periodic,
+            r_cut=self.r_cut,
+            n_max=self.n_max,
+            l_max=self.l_max,
+            sparse=self.sparse,
+            average="off"
         )
 
     @classmethod
@@ -276,8 +307,15 @@ class SOAPCrystalStructureFeaturizer:
         Add a create_featurizer_from_configuration_dictionary classmethod for
         recreating an exactly logged descriptor.
         """
-        raise NotImplementedError(
-            "Create the featurizer from the supplied species and settings"
+        species_copy = list(species) # copy
+
+        return cls(
+            species=species_copy,
+            r_cut=r_cut,
+            n_max=n_max,
+            l_max=l_max,
+            periodic=periodic,
+            sparse=sparse,
         )
 
     @property
@@ -305,9 +343,8 @@ class SOAPCrystalStructureFeaturizer:
         Build a small table showing the feature count as species, n_max, and
         l_max change.
         """
-        raise NotImplementedError(
-            "Query the SOAP feature count from self._soap"
-        )
+        return int(self._soap.get_number_of_features())
+
 
     def estimate_dense_feature_matrix_memory_gb(
         self,
@@ -340,9 +377,11 @@ class SOAPCrystalStructureFeaturizer:
         - Compare dense and sparse storage estimates.
         - Estimate disk space for cached descriptors.
         """
-        raise NotImplementedError(
-            "Estimate dense SOAP matrix memory from its shape and dtype"
-        )
+        # input validation
+        if not (isinstance(number_of_structures, int) and number_of_structures > 0):
+            raise ValueError("number_of_structures must be a positive integer.")
+
+        return number_of_structures * self.number_of_features_per_atomic_environment * np.dtype(dtype).itemsize / (1024**3)
 
 
     #### [ 3. Create local SOAP and pool it into crystal descriptors ] ####
@@ -379,9 +418,25 @@ class SOAPCrystalStructureFeaturizer:
         - Permute atoms and verify that local rows permute consistently.
         - Time descriptor creation as atom count changes.
         """
-        raise NotImplementedError(
-            "Convert one structure and calculate its local SOAP descriptors"
-        )
+        # input validation
+        if not (isinstance(structure, Structure)):
+            raise ValueError("structure must be a pymatgen Structure.")
+
+        ase_atoms = AseAtomsAdaptor.get_atoms(structure) # conversion to ASE Atoms
+        local_soap = self._soap.create(ase_atoms) # evaluation SOAP descriptors
+
+        if self.sparse:
+            local_soap = local_soap.toarray()
+        else:
+            local_soap = np.asarray(local_soap)
+
+        # check dimensions
+        expected_shape = (len(structure), self.number_of_features_per_atomic_environment)
+        
+        if local_soap.shape != expected_shape:
+            raise ValueError(f"Shape mismatch: expected {expected_shape}, got {local_soap.shape}")
+
+        return local_soap
 
     @staticmethod
     def pool_atomic_descriptors_into_structure_descriptor(
