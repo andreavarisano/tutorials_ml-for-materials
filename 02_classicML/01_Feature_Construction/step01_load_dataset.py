@@ -33,6 +33,8 @@ import numpy as np
 import pandas as pd
 from matminer.datasets import load_dataset
 
+from sklearn.model_selection import train_test_split
+
 
 #### [ 1. Load a materials dataset containing crystal structures ] ####
 def load_dielectric_dataset() -> pd.DataFrame:
@@ -173,14 +175,50 @@ def create_dataset_split(
     different representation, document it and update downstream files
     consistently.
     """
-    raise NotImplementedError("Create deterministic dataset partitions")
+    # input validation
+    if not isinstance(n_samples, int):
+        raise TypeError(f"n_samples must be a integer (int), input: {type(n_samples)}") #??
+    if n_samples <= 0:
+        raise ValueError("n_samples must be greater than 0.")
+    if validation_fraction < 0 or test_fraction < 0:
+        raise ValueError("Fractions must be non negative.")
+    if validation_fraction + test_fraction >= 1.0:
+        raise ValueError("The sum of validation and test must be lower than 1.")    
 
+    indices = np.arange(n_samples) # array of indices
+
+    # test set indices
+    if test_fraction > 0:
+      train_val_indices, test_indices = train_test_split(indices, test_size=test_fraction, random_state=random_seed)
+    else:
+      train_val_indices = indices
+      test_indices = np.array([], dtype=int)
+
+    # validation set indices
+    if validation_fraction > 0:
+      validation_relative_fraction = validation_fraction / (1 - test_fraction)
+      train_indices, validation_indices = train_test_split(train_val_indices, test_size=validation_relative_fraction, random_state=random_seed)
+    else:
+      train_indices = train_val_indices
+      validation_indices = np.array([], dtype=int)
+
+    return DatasetSplit(train=train_indices, validation=validation_indices, test=test_indices)
 
 def main() -> None:
     """Load, inspect, and split the dataset using the functions above."""
-    raise NotImplementedError(
-        "Combine the completed dataset exploration and splitting functions"
-    )
+    print("Loading matbench_dielectric dataframe \n")
+    dataframe = load_dielectric_dataset()
+
+    print("Computing dataset statistics \n")
+    stats, element_freq = compute_dataset_statistics(dataframe["structure"], dataframe["n"])
+    print("--- Dataset Statistics ---")
+    print(stats)
+    print("\n--- Top 5 Most Frequent Elements ---")
+    print(element_freq.head(5))
+    print("\n" + "=" * 40 + "\n")
+
+    print("Creating dataset splits")
+    split = create_dataset_split(n_samples=len(dataframe), validation_fraction=0.15, test_fraction=0.15, random_seed=42)
 
 
 if __name__ == "__main__":
