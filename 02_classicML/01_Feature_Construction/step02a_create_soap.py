@@ -105,6 +105,8 @@ from dscribe.descriptors import SOAP
 from pymatgen.core import Structure
 from pymatgen.io.ase import AseAtomsAdaptor
 
+from step01_load_dataset import load_dielectric_dataset
+
 
 # ---------------------------------------------------------------------------
 # Original exploratory stub
@@ -470,9 +472,21 @@ class SOAPCrystalStructureFeaturizer:
         - Compare mean, sum, maximum, and attention-based pooling.
         - Study what happens when the same unit cell is repeated as a supercell.
         """
-        raise NotImplementedError(
-            "Pool local SOAP descriptors over the atomic dimension"
-        )
+        # input validation
+        if not isinstance(local_atomic_features, np.ndarray):
+            raise ValueError("local_atomic_features must be a NumPy array.")
+        if local_atomic_features.ndim != 2:
+            raise ValueError(f"local_descriptors must be 2D, got {local_atomic_features.ndim}D")
+        if local_atomic_features.size == 0:
+            raise ValueError("The local_atomic_features array is empty.")
+
+        # pooling
+        if pooling_mode == "mean":
+            return np.mean(local_atomic_features, axis=0)
+        elif pooling_mode == "sum":
+            return np.sum(local_atomic_features, axis=0)
+        else:
+            raise ValueError(f"Invalid pooling mode. Must be 'mean' or 'sum', got {pooling_mode}")
 
     def create_pooled_feature_matrix_for_structures(
         self,
@@ -510,9 +524,24 @@ class SOAPCrystalStructureFeaturizer:
         - Add progress reporting and controlled parallel calculation.
         - Process structures in chunks when the matrix is large.
         """
-        raise NotImplementedError(
-            "Create, pool, and stack SOAP descriptors"
-        )
+        # input validation
+        n_structures = len(structures)
+        if n_structures == 0:
+            raise ValueError("The structure collection is empty.")
+
+        n_features = self.number_of_features_per_atomic_environment
+
+        feature_matrix = np.empty((n_structures, n_features))
+
+        for i, s in enumerate(structures):
+            local_soap = self.create_local_soap_descriptors_for_structure(s)
+            pooled_soap = self.pool_atomic_descriptors_into_structure_descriptor(local_soap, pooling_mode)
+            feature_matrix[i, :] = pooled_soap
+
+        if feature_matrix.shape != (n_structures, n_features):
+            raise ValueError(f"Shape mismatch: expected ({n_structures}, {n_features}), got {feature_matrix.shape}")
+
+        return feature_matrix
 
 
 #### [ 4. Assemble and check the complete SOAP workflow ] ####
@@ -545,9 +574,31 @@ def main() -> None:
     - Add timing and memory measurements.
     - Compare mean-pooled SOAP with a simple composition-only baseline.
     """
-    raise NotImplementedError(
-        "Combine the completed SOAP exercise components"
-    )
+    print("Loading dataset...")
+    dataframe = load_dielectric_dataset()
+    print("Dataset loaded.\n")
+
+    print("Extracting species vocabulary...")
+    structures = dataframe['structure']
+    sorted_species = collect_sorted_species_list_from_structures(structures)
+    print(f"Extracted sorted species vocabulary: {sorted_species}\n")
+
+    print("Creating SOAP featurizer...")
+    featurizer = SOAPCrystalStructureFeaturizer(species=sorted_species)
+    print(f"SOAP feature count: {featurizer.number_of_features_per_atomic_environment}\n")
+
+    print("Memory Safety Check...")
+    n_features = featurizer.number_of_features_per_atomic_environment
+    n_structures = len(structures)
+    print(f"Expected SOAP features per environment: {n_features}")
+    memory = featurizer.estimate_dense_feature_matrix_memory_gb(n_structures)
+    print(f"Estimated RAM memory for the final matrix: {memory:.4f} GiB\n")
+
+    print("Starting calculations...")
+    feature_matrix = featurizer.create_pooled_feature_matrix_for_structures(structures)
+    exp_shape = (n_structures, n_features)
+    # if feature_matrix.shape != exp_shape, a ValueError is rised
+    print(f"Final feature matrix shape {feature_matrix.shape} matched the expected shape {exp_shape}\n")
 
 
 if __name__ == "__main__":
