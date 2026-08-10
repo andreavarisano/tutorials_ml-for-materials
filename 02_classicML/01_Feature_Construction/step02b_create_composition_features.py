@@ -63,6 +63,8 @@ from matminer.featurizers.base import MultipleFeaturizer
 from matminer.featurizers.composition import ElementProperty, Stoichiometry
 from pymatgen.core import Composition, Structure
 
+from step01_load_dataset import load_dielectric_dataset
+
 
 #### [ 1. Extract compositions without changing structure order ] ####
 def extract_compositions_from_structures(
@@ -88,9 +90,21 @@ def extract_compositions_from_structures(
     Start with a few structures and print their reduced formulas beside the
     corresponding dataframe row positions.
     """
-    raise NotImplementedError(
-        "Extract one ordered Composition object per structure"
-    )
+    # input validation
+    if len(structures) == 0:
+      raise ValueError("The structure collection is empty.")
+
+    # list of compositions
+    compositions = []
+
+    for i, structure in enumerate(structures):
+
+      # input validation
+      if not (isinstance(structure, Structure)):
+        raise ValueError("The structure must be a pymatgen Structure.")
+
+      compositions.append(structure.composition)
+    return compositions
 
 
 #### [ 2. Configure the Matminer composition featurizer ] ####
@@ -120,9 +134,13 @@ def create_composition_featurizer() -> MultipleFeaturizer:
     - Add BandCenter as a simple electronegativity-derived feature.
     - Compare with ElementFraction and discuss its species-dependent size.
     """
-    raise NotImplementedError(
-        "Create the Stoichiometry plus Magpie MultipleFeaturizer"
-    )
+    stoichiometry = Stoichiometry()
+    element_property = ElementProperty.from_preset("magpie")
+    composition_featurizer = MultipleFeaturizer([
+        stoichiometry,
+        element_property,
+    ])
+    return composition_featurizer
 
 
 #### [ 3. Calculate the composition feature matrix and labels ] ####
@@ -152,9 +170,13 @@ def create_composition_feature_matrix_and_labels(
     Calculate a small slice first. Print feature names beside the first row so
     the generated values remain interpretable.
     """
-    raise NotImplementedError(
-        "Calculate and validate composition features and labels"
-    )
+    stoichiometry = Stoichiometry()
+    element_property = ElementProperty.from_preset("magpie")
+    composition_featurizer = MultipleFeaturizer([
+        stoichiometry,
+        element_property,
+    ])
+    return composition_featurizer
 
 
 def main() -> None:
@@ -168,9 +190,32 @@ def main() -> None:
     - Calculate feature values and labels.
     - Print and validate matrix shape, feature count, and a few feature names.
     """
-    raise NotImplementedError(
-        "Combine the composition-feature construction functions"
-    )
+    print("Loading dataset...")
+    dataframe = load_dielectric_dataset()
+
+    print("Extracting compositions...")
+    structures = dataframe["structure"]
+    n_structures = len(structures)
+    compositions = extract_compositions_from_structures(structures)
+
+    print("Creating the composition featurizer...")
+    composition_featurizer = create_composition_featurizer()
+
+    print("Calculating the composition feature matrix and labels...")
+    feature_matrix, feature_names = create_composition_feature_matrix_and_labels(compositions, composition_featurizer)
+    n_features = len(feature_names)
+
+    exp_shape = (n_structures, n_features)
+
+    if feature_matrix.shape == exp_shape:
+        print(f"Final feature matrix shape {feature_matrix.shape} matched the expected shape {exp_shape}\n")
+    else:
+        raise ValueError(f"Final feature matrix shape {feature_matrix.shape} did not match the expected shape {exp_shape}\n")
+
+    print(f"Total number of features generated: {len(feature_names)}")
+    print("First 10 feature names:")
+    for name in feature_names[:10]:
+        print(f"- {name}")
 
 
 if __name__ == "__main__":
