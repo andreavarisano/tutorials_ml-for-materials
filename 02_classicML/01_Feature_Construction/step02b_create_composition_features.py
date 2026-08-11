@@ -170,13 +170,33 @@ def create_composition_feature_matrix_and_labels(
     Calculate a small slice first. Print feature names beside the first row so
     the generated values remain interpretable.
     """
-    stoichiometry = Stoichiometry()
-    element_property = ElementProperty.from_preset("magpie")
-    composition_featurizer = MultipleFeaturizer([
-        stoichiometry,
-        element_property,
-    ])
-    return composition_featurizer
+    # input validation
+    if len(compositions) == 0:
+      raise ValueError("The composition collection is empty.")
+
+
+    feature_rows = composition_featurizer.featurize_many(
+        compositions,
+        ignore_errors=False,
+        )
+    feature_names = composition_featurizer.feature_labels()
+
+    feature_matrix = np.array(feature_rows)
+
+    # matrix validation
+    if feature_matrix.ndim != 2:
+      raise ValueError("The matrix does not have two dimensions.")
+
+    if not np.isfinite(feature_matrix).all():
+      raise ValueError("The matrix does not have finite values.")
+
+    if feature_matrix.shape[0] != len(compositions):
+      raise ValueError("The number of rows does not match the number of compositions.")
+
+    if feature_matrix.shape[1] != len(feature_names):
+      raise ValueError("The number of columns does not match the number of feature names.")
+
+    return feature_matrix, feature_names
 
 
 def main() -> None:

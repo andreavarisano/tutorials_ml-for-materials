@@ -60,6 +60,10 @@ from typing import Sequence
 
 import numpy as np
 
+from step01_load_dataset import load_dielectric_dataset
+import step02a_create_soap as fsoap
+import step02b_create_composition_features as fcomp 
+
 
 #### [ 1. Concatenate SOAP and composition columns ] ####
 def concatenate_soap_and_composition_feature_matrices(
@@ -87,9 +91,33 @@ def concatenate_soap_and_composition_feature_matrices(
     Test the function first with small hand-written matrices whose output is
     obvious.
     """
-    raise NotImplementedError(
-        "Validate row alignment and concatenate feature columns"
+    # input validation
+    if not np.isfinite(soap_features).all() or not np.isfinite(composition_features).all():
+        raise ValueError("Input arrays must be finite.")
+    if soap_features.size == 0 or composition_features.size == 0:
+        raise ValueError("Input arrays must not be empty.")
+    if soap_features.ndim != 2 or composition_features.ndim != 2:
+        raise ValueError("Input arrays must be two-dimensional.")
+
+    n_rows_soap, n_cols_soap = soap_features.shape
+    n_rows_comp, n_cols_comp = composition_features.shape
+
+    if n_rows_soap != n_rows_comp:
+        raise ValueError("Input arrays must have the same number of rows.")
+    
+    # concatenation
+    combined_features = np.concatenate(
+        [soap_features, composition_features],
+        axis=1,
     )
+
+    # output validation
+    n_rows_exp = n_rows_soap
+    n_cols_exp = n_cols_soap + n_cols_comp
+    if combined_features.shape != (n_rows_exp, n_cols_exp):
+        raise ValueError("Combined array has incorrect shape.")
+    
+    return combined_features
 
 
 #### [ 2. Create names for the combined feature columns ] ####
@@ -112,9 +140,22 @@ def create_names_for_concatenated_features(
     SOAP columns may not have simple human-readable physical labels, but stable
     names are still useful for logging, feature selection, and debugging.
     """
-    raise NotImplementedError(
-        "Create ordered names for SOAP and composition columns"
-    )
+    # input validation
+    if number_of_soap_features <= 0:
+        raise ValueError("Number of SOAP features must be positive.")
+
+    # SOAP names
+    soap_names = [f"soap_{i:06d}" for i in range(number_of_soap_features)]
+
+    # composition names
+    composition_names = [f"composition__{name}" for name in composition_feature_names]
+
+    # reject duplicate final names
+    combined_names = soap_names + composition_names
+    if len(combined_names) != len(set(combined_names)):
+        raise ValueError("Duplicate feature names found.")
+
+    return combined_names
 
 
 def main() -> None:
@@ -134,10 +175,47 @@ def main() -> None:
     This step does not fit scalers. Scaling and leakage prevention belong to
     Step 04.
     """
-    raise NotImplementedError(
-        "Prepare aligned composition, SOAP, and combined feature matrices"
-    )
+    print("Loading dataset...")
+    dataframe = load_dielectric_dataset()
+    structures = dataframe["structure"]
 
+    # === SOAP ===
+    print("Extracting species vocabulary...")
+    sorted_species = fsoap.collect_sorted_species_list_from_structures(structures)
+
+    print("Creating SOAP featurizer...")
+    soap_featurizer = fsoap.SOAPCrystalStructureFeaturizer(species = sorted_species)
+
+    print("Calculating SOAP feature matrix...")
+    X_soap = soap_featurizer.create_pooled_feature_matrix_for_structures(structures)
+
+    # === Composition ===
+    print("Extracting compositions...")
+    compositions = fcomp.extract_compositions_from_structures(structures)
+
+    print("Creating composition featurizer...")
+    composition_featurizer = fcomp.create_composition_featurizer()
+
+    print("Calculating composition feature matrix and label...")
+    X_composition, composition_feature_names = fcomp.create_composition_feature_matrix_and_labels(compositions, composition_featurizer)
+
+    # === Combined ===
+    print("Concatenating SOAP and composition feature matrices...")
+    X_combined = concatenate_soap_and_composition_feature_matrices(X_soap, X_composition)
+
+    print("Creating combined feature names...")
+    number_of_soap_features = soap_featurizer.number_of_features_per_atomic_environment
+    combined_names = create_names_for_concatenated_features(number_of_soap_features, composition_feature_names)
+
+    if X_combined.shape[1] == len(combined_names):
+        print("Matrices perfectly aligned and correctly concatenated.")
+    else:
+        raise ValueError("Matrix columns do not match the number of feature names.")
+
+    # === Final shapes ===
+    print(f"\nShape of SOAP feature matrix: {X_soap.shape}")
+    print(f"Shape of composition feature matrix: {X_composition.shape}")
+    print(f"Shape of combined feature matrix: {X_combined.shape}")
 
 if __name__ == "__main__":
     main()
