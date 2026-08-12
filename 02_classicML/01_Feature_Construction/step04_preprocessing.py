@@ -70,6 +70,11 @@ preprocessing order as part of the model configuration.
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
+import step01_load_dataset as load
+import step02a_create_soap as fsoap
+import step02b_create_composition_features as fcomp
+import step03_concatenate_features as conc
+
 
 #### [ 1. Fit a scaler for the scalar regression target ] ####
 def fit_target_standard_scaler(
@@ -96,9 +101,29 @@ def fit_target_standard_scaler(
     Inspect scaler.mean_ and scaler.scale_, then verify that transformed
     training targets have approximately zero mean and unit variance.
     """
-    raise NotImplementedError(
-        "Validate and fit the target scaler on training targets only"
-    )
+    # input validation
+    if training_targets.size == 0:
+        raise ValueError("The training targets array cannot be empty.")
+    if not np.issubdtype(training_targets.dtype, np.number):
+        raise TypeError("The training targets array must be numeric.")
+    if not np.isfinite(training_targets).all():
+        raise ValueError("The training targets array contains NaN or Inf values.")
+
+    # reshaping
+    if training_targets.ndim == 1:
+        training_targets_2d = training_targets.reshape(-1, 1)
+    elif training_targets.ndim == 2:
+        if training_targets.shape[1] > 1:
+            raise ValueError("The training targets array must be a single column.")
+        training_targets_2d = training_targets
+    else:
+        raise ValueError("The training targets array must be a one-dimensional or two-dimensional array.")
+
+    # fitting
+    scaler = StandardScaler()
+    scaler.fit(training_targets_2d)
+
+    return scaler
 
 
 #### [ 2. Fit a scaler for a feature representation ] ####
@@ -132,9 +157,19 @@ def fit_feature_standard_scaler(
     - Fit PCA after scaling, using training rows only.
     - Compare StandardScaler with RobustScaler.
     """
-    raise NotImplementedError(
-        "Validate and fit a feature scaler on training rows only"
-    )
+    # input validation
+    if training_features.size == 0:
+        raise ValueError("The training features array cannot be empty.")
+    if not np.isfinite(training_features).all():
+        raise ValueError("The training features array contains NaN or Inf values.")
+    if training_features.ndim != 2:
+        raise ValueError("The training features array must be a two-dimensional array")
+
+    # fitting
+    scaler = StandardScaler()
+    scaler.fit(training_features)
+
+    return scaler
 
 
 def main() -> None:
@@ -155,9 +190,89 @@ def main() -> None:
     Never reuse the SOAP scaler for composition or combined features. Never
     refit a scaler when transforming validation or test data.
     """
-    raise NotImplementedError(
-        "Fit and apply training-only preprocessing for every representation"
+    # === Dataset ===
+    print("Loading dataset...")
+    dataframe = load.load_dielectric_dataset()
+        
+    split = load.create_dataset_split(
+        n_samples=len(dataframe),
+        validation_fraction=0.15,
+        test_fraction=0.15,
+        random_seed=42,
     )
+    
+    structures = dataframe["structure"]
+    targets = dataframe["n"].to_numpy(dtype=np.float64).reshape(-1,1) # 2D numpy array
+
+    # === SOAP ===
+    print("Generating SOAP feature matrix...")
+    sorted_species = fsoap.collect_sorted_species_list_from_structures(structures)
+    soap_featurizer = fsoap.SOAPCrystalStructureFeaturizer(species=sorted_species)
+    X_soap = soap_featurizer.create_pooled_feature_matrix_for_structures(structures)
+
+    # === Composition ===
+    print("Generating composition feature matrix and label...")
+    compositions = fcomp.extract_compositions_from_structures(structures)
+    composition_featurizer = fcomp.create_composition_featurizer()
+    X_composition, composition_feature_names = fcomp.create_composition_feature_matrix_and_labels(
+        compositions, 
+        composition_featurizer
+    )
+
+    # === Combined ===
+    print("Concatenating SOAP and composition feature matrices...")
+    X_combined = conc.concatenate_soap_and_composition_feature_matrices(X_soap, X_composition)
+    number_of_soap_features = soap_featurizer.number_of_features_per_atomic_environment
+    combined_names = conc.create_names_for_concatenated_features(number_of_soap_features, composition_feature_names)
+
+    # === Scaler ===
+    print("Scaling on training data...")
+    target_scaler = fit_target_standard_scaler(targets[split.train])
+    y_train = target_scaler.transform(targets[split.train])
+    y_val = target_scaler.transform(targets[split.validation])
+    y_test = target_scaler.transform(targets[split.test])
+
+    soap_scaler = fit_feature_standard_scaler(X_soap[split.train])
+    X_soap_train = soap_scaler.transform(X_soap[split.train])
+    X_soap_val = soap_scaler.transform(X_soap[split.validation])
+    X_soap_test = soap_scaler.transform(X_soap[split.test])
+
+    composition_scaler = fit_feature_standard_scaler(X_composition[split.train])
+    X_composition_train = composition_scaler.transform(X_composition[split.train])
+    X_composition_val = composition_scaler.transform(X_composition[split.validation])
+    X_composition_test = composition_scaler.transform(X_composition[split.test])
+
+    combined_scaler = fit_feature_standard_scaler(X_combined[split.train])
+    X_combined_train = combined_scaler.transform(X_combined[split.train])
+    X_combined_val = combined_scaler.transform(X_combined[split.validation])
+    X_combined_test = combined_scaler.transform(X_combined[split.test])
+
+    # === Final checks ===
+    print("\nFinal checks:")
+    np.set_printoptions(suppress=True, precision=4)
+
+    print(f"Target Train Scaled Mean      : {np.mean(y_train):.4f}")
+    print(f"SOAP Train Scaled Mean        : {np.mean(X_soap_train):.4f}")
+    print(f"Composition Train Scaled Mean : {np.mean(X_composition_train):.4f}")
+    print(f"Combined Train Scaled Mean    : {np.mean(X_combined_train):.4f}")
+    print(f"Target Train Scaled Std       : {np.std(y_train):.4f}")
+    print(f"SOAP Train Max Col Std        : {np.max(np.std(X_soap_train, axis=0)):.4f}")
+    print(f"Composition Train Max Col Std : {np.max(np.std(X_composition_train, axis=0)):.4f}")
+    print(f"Combined Train Max Col Std    : {np.max(np.std(X_combined_train, axis=0)):.4f}")
+    
+    print("\nMatrix shapes")
+    print(f"X_soap_train                  : {X_soap_train.shape}")
+    print(f"X_composition_train           : {X_composition_train.shape}")
+    print(f"X_combined_train              : {X_combined_train.shape}")
+    print(f"y_train                       : {y_train.shape}")
+    print(f"X_soap_test                   : {X_soap_test.shape}")
+    print(f"X_composition_test            : {X_composition_test.shape}")
+    print(f"X_combined_test               : {X_combined_test.shape}")
+    print(f"y_test                        : {y_test.shape}")
+    print(f"X_soap_val                    : {X_soap_val.shape}")
+    print(f"X_composition_val             : {X_composition_val.shape}")
+    print(f"X_combined_val                : {X_combined_val.shape}")
+    print(f"y_val                         : {y_val.shape}")
 
 
 if __name__ == "__main__":
