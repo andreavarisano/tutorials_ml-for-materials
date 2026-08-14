@@ -492,6 +492,7 @@ class SOAPCrystalStructureFeaturizer:
         self,
         structures: Sequence[Structure] | pd.Series,
         pooling_mode: PoolingMode = "mean",
+        dtype: np.dtype | type = np.float64, # to manage memory usage
     ) -> np.ndarray:
         """Create one pooled SOAP row for every structure.
 
@@ -531,12 +532,12 @@ class SOAPCrystalStructureFeaturizer:
 
         n_features = self.number_of_features_per_atomic_environment
 
-        feature_matrix = np.empty((n_structures, n_features))
+        feature_matrix = np.empty((n_structures, n_features), dtype=dtype)
 
         for i, s in enumerate(structures):
             local_soap = self.create_local_soap_descriptors_for_structure(s)
             pooled_soap = self.pool_atomic_descriptors_into_structure_descriptor(local_soap, pooling_mode)
-            feature_matrix[i, :] = pooled_soap
+            feature_matrix[i, :] = pooled_soap.astype(dtype)
 
         if feature_matrix.shape != (n_structures, n_features):
             raise ValueError(f"Shape mismatch: expected ({n_structures}, {n_features}), got {feature_matrix.shape}")
