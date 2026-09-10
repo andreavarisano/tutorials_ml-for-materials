@@ -1,59 +1,4 @@
-"""Step 02b: create composition-only descriptors with Matminer.
-
-Complete each function by replacing raise NotImplementedError.
-
-Learning goals
---------------
-1. Convert crystal structures into pymatgen Composition objects.
-2. Configure interpretable Matminer composition featurizers.
-3. Create a finite, named composition-feature matrix.
-4. Preserve structure-row order for later comparison with SOAP.
-
-
-A tiny bit of knowledge: composition and structure describe different things
-----------------------------------------------------------------------------
-Composition descriptors use only which elements are present and their relative
-amounts. They are global, structure-independent descriptors: they do not use
-atomic coordinates, bond lengths, bond angles, or local atomic environments.
-
-Consequently, two polymorphs with the same composition receive identical
-composition descriptors.
-
-SOAP instead begins from the local environment around each atom and contains
-both chemical and structural information. Pooling converts those local
-descriptors into a global vector, but it does not erase all local-environment
-information: it aggregates it. It does remove site correspondence and may lose
-information about the distribution of environments.
-
-SOAP and composition descriptors are therefore not completely independent,
-because SOAP already contains chemical information. A later exercise will test
-whether explicit global composition statistics add useful information beyond
-pooled SOAP.
-
-
-A practical Matminer composition workflow
-------------------------------------------
-Constructing the composition representation has two main stages.
-
-1. Configure the Matminer featurizer:
-
-       composition_featurizer = MultipleFeaturizer([
-           Stoichiometry(),
-           ElementProperty.from_preset("magpie"),
-       ])
-
-   Stoichiometry describes concentration patterns. The Magpie preset calculates
-   statistics of tabulated elemental properties, such as composition-weighted
-   means and ranges.
-
-2. Calculate the feature rows and their names:
-
-       compositions = extract_compositions_from_structures(structures)
-       feature_rows = composition_featurizer.featurize_many(compositions)
-       feature_names = composition_featurizer.feature_labels()
-
-Always query feature_labels() rather than hard-coding the descriptor dimension.
-"""
+"""Step 02b: create composition-only descriptors with Matminer."""
 
 from typing import Sequence
 
@@ -67,66 +12,28 @@ from step01_load_dataset import load_dielectric_dataset
 
 
 #### [ 1. Extract compositions without changing structure order ] ####
+def _validate_structure_collection(structures: Sequence[Structure] | pd.Series) -> None:
+    """Validate the structure collection."""
+    if len(structures) == 0:
+        raise ValueError("The structure collection is empty.")
+
+    for structure in structures:
+        if not isinstance(structure, Structure):
+            raise ValueError(f"All structures must be a pymatgen Structure.")
+
+
 def extract_compositions_from_structures(
     structures: Sequence[Structure] | pd.Series,
 ) -> list[Composition]:
-    """Return one pymatgen Composition object for every structure.
+    """Return one pymatgen Composition object for every structure."""
+    _validate_structure_collection(structures)
 
-    Requirements
-    ------------
-    - Reject an empty collection.
-    - Check that every entry is a pymatgen Structure.
-    - Extract structure.composition.
-    - Preserve the original row order.
-    - Return exactly one Composition per input structure.
-
-    Beware / remember
-    -----------------
-    Do not sort structures or deduplicate compositions. Different structures
-    may intentionally share a composition, for example polymorphs.
-
-    Advice
-    ------
-    Start with a few structures and print their reduced formulas beside the
-    corresponding dataframe row positions.
-    """
-    # input validation
-    if len(structures) == 0:
-      raise ValueError("The structure collection is empty.")
-
-    # list of compositions
-    compositions = []
-
-    for i, structure in enumerate(structures):
-
-      # input validation
-      if not (isinstance(structure, Structure)):
-        raise ValueError("The structure must be a pymatgen Structure.")
-
-      compositions.append(structure.composition)
-    return compositions
+    return [structure.composition for structure in structures]
 
 
 #### [ 2. Configure the Matminer composition featurizer ] ####
 def create_composition_featurizer() -> MultipleFeaturizer:
     """Create the composition descriptor used in this exercise.
-
-    Requirements
-    ------------
-    - Construct Stoichiometry with its documented default settings.
-    - Construct ElementProperty from the "magpie" preset.
-    - Combine them in a MultipleFeaturizer, in that order.
-    - Return the configured MultipleFeaturizer.
-
-    Beware / remember
-    -----------------
-    Feature order is part of the representation. Changing featurizer order or
-    settings creates a different model input and must be recorded.
-
-    Advice
-    ------
-    Print feature_labels() immediately after construction. Also inspect and
-    retain the scientific references returned by citations().
 
     Possible extensions
     -------------------
@@ -134,67 +41,58 @@ def create_composition_featurizer() -> MultipleFeaturizer:
     - Add BandCenter as a simple electronegativity-derived feature.
     - Compare with ElementFraction and discuss its species-dependent size.
     """
-    stoichiometry = Stoichiometry()
-    element_property = ElementProperty.from_preset("magpie")
-    composition_featurizer = MultipleFeaturizer([
-        stoichiometry,
-        element_property,
-    ])
-    return composition_featurizer
+
+    return MultipleFeaturizer(
+        [
+            Stoichiometry(),
+            ElementProperty.from_preset("magpie"),
+        ]
+    )
 
 
 #### [ 3. Calculate the composition feature matrix and labels ] ####
+def _validate_feature_matrix(
+    matrix: np.ndarray, expected_rows: int, expected_cols: int
+) -> None:
+    """Validate the composition feature matrix."""
+    if matrix.ndim != 2:
+        raise ValueError("The matrix does not have two dimensions.")
+
+    if not np.isfinite(matrix).all():
+        raise ValueError("The matrix does not have finite values.")
+
+    if matrix.shape[0] != expected_rows:
+        raise ValueError(
+            "The number of rows does not match the number of compositions."
+        )
+
+    if matrix.shape[1] != expected_cols:
+        raise ValueError(
+            "The number of columns does not match the number of feature names."
+        )
+
+
 def create_composition_feature_matrix_and_labels(
     compositions: Sequence[Composition],
     composition_featurizer: MultipleFeaturizer,
 ) -> tuple[np.ndarray, list[str]]:
-    """Calculate one named composition-feature row per material.
-
-    Requirements
-    ------------
-    - Reject an empty composition collection.
-    - Call composition_featurizer.featurize_many with errors not ignored.
-    - Obtain feature names using composition_featurizer.feature_labels().
-    - Convert feature rows into a floating-point NumPy array.
-    - Require a finite, two-dimensional matrix.
-    - Verify the number of rows and the number of named columns.
-    - Return the matrix and feature-name list.
-
-    Beware / remember
-    -----------------
-    Do not silently discard failed structures. Doing so would break alignment
-    with SOAP, targets, and split indices.
-
-    Advice
-    ------
-    Calculate a small slice first. Print feature names beside the first row so
-    the generated values remain interpretable.
-    """
+    """Calculate one named composition-feature row per material."""
     # input validation
     if len(compositions) == 0:
-      raise ValueError("The composition collection is empty.")
-
+        raise ValueError("The composition collection is empty.")
 
     feature_rows = composition_featurizer.featurize_many(
         compositions,
         ignore_errors=False,
-        )
+    )
     feature_names = composition_featurizer.feature_labels()
 
     feature_matrix = np.array(feature_rows)
-
-    # matrix validation
-    if feature_matrix.ndim != 2:
-      raise ValueError("The matrix does not have two dimensions.")
-
-    if not np.isfinite(feature_matrix).all():
-      raise ValueError("The matrix does not have finite values.")
-
-    if feature_matrix.shape[0] != len(compositions):
-      raise ValueError("The number of rows does not match the number of compositions.")
-
-    if feature_matrix.shape[1] != len(feature_names):
-      raise ValueError("The number of columns does not match the number of feature names.")
+    _validate_feature_matrix(
+        feature_matrix,
+        expected_rows=len(compositions),
+        expected_cols=len(feature_names),
+    )
 
     return feature_matrix, feature_names
 
@@ -222,15 +120,13 @@ def main() -> None:
     composition_featurizer = create_composition_featurizer()
 
     print("Calculating the composition feature matrix and labels...")
-    feature_matrix, feature_names = create_composition_feature_matrix_and_labels(compositions, composition_featurizer)
-    n_features = len(feature_names)
-
-    exp_shape = (n_structures, n_features)
-
-    if feature_matrix.shape == exp_shape:
-        print(f"Final feature matrix shape {feature_matrix.shape} matched the expected shape {exp_shape}\n")
-    else:
-        raise ValueError(f"Final feature matrix shape {feature_matrix.shape} did not match the expected shape {exp_shape}\n")
+    feature_matrix, feature_names = create_composition_feature_matrix_and_labels(
+        compositions, composition_featurizer
+    )
+    # The shape is validated inside the function, but we can print it for user information.
+    print(
+        f"Final feature matrix shape {feature_matrix.shape} matched the expected shape {(n_structures, len(feature_names))}\n"
+    )
 
     print(f"Total number of features generated: {len(feature_names)}")
     print("First 10 feature names:")
